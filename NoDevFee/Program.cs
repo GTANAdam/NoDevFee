@@ -29,6 +29,7 @@ namespace NoDevFee
                 }
 
                 strOurWallet = args[0];
+                byteOurWallet = Encoding.ASCII.GetBytes(strOurWallet);
             }
             else
             {
