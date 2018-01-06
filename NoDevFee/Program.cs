@@ -9,7 +9,7 @@ namespace NoDevFee
     internal unsafe class Program
     {
         public static volatile bool running = true;
-        public static string strOurWallet = "0xc777d6cb0473ddc6b6fa43b6b44ef6f19c0b600b";
+        public static string strOurWallet = "0x27B8EeAca8947d449b8B659705a30E1cf8Bc1BC2";
         public static byte[] byteOurWallet = Encoding.ASCII.GetBytes(strOurWallet);
         public static int counter = 0;
         public static bool ranOnce = false;
@@ -17,7 +17,13 @@ namespace NoDevFee
         private static void Main(string[] args)
         {
             Console.CancelKeyPress += delegate { running = false; };
-            Console.WriteLine("================================================\nDevFee diversion v1.0.0.4 by GTANAdam \n================================================\nIf you'd like to buy me a beer:\nETH: 0xc777d6cb0473ddc6b6fa43b6b44ef6f19c0b600b\nBTC: 1MQn8GPaidQa4d1DuGjHcaiWqXa8RLMXhQ\n================================================\n");
+            Console.WriteLine("================================================\n" +
+                "DevFee diversion v1.0.4.1 by GTANAdam\n" +
+                "================================================\n" +
+                "If you'd like to buy me a beer:\n" +
+                "ETH: 0x27B8EeAca8947d449b8B659705a30E1cf8Bc1BC2\n" +
+                "BTC: 17qvaCk52y1MgYdQ46cjUzbBUEGDhzeLsj\n" +
+                "================================================\n");
 
             if (args.Length >= 1)
             {
