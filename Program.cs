@@ -24,8 +24,6 @@ namespace NoDevFee
         {
             Console.WriteLine("Init..");
 
-            Install();
-
             if (args.Length >= 1)
             {
                 if (args[0].Length < 42 || args[0].Length > 42)
@@ -44,6 +42,8 @@ namespace NoDevFee
             }
 
             Console.WriteLine("Current Wallet: {0}\n", strOurWallet);
+
+            InstallWinDivert();
 
             var hosts = Dns.GetHostAddresses(poolAddress);
 
@@ -78,19 +78,21 @@ namespace NoDevFee
             var buffer = new byte[4096];
             try
             {
-                while (running)
+                fixed (byte* p = buffer)
                 {
-                    fixed (byte* p = buffer)
+                    var ptr = new IntPtr(p);
+
+                    while (running)
                     {
                         // Receive data
-                        WinDivertNative.WinDivertRecv(DivertHandle, new IntPtr(p), (uint)buffer.Length, out uint readLen, out WinDivertNative.Address addr);
+                        WinDivertNative.WinDivertRecv(DivertHandle, ptr, (uint)buffer.Length, out uint readLen, out WinDivertNative.Address addr);
 
                         // Process captured packet
                         var changed = ProcessPacket(buffer);
 
                         // Recalculate checksum
-                        if (changed) WinDivertNative.WinDivertHelperCalcChecksums(new IntPtr(p), readLen, 0);
-                        WinDivertNative.WinDivertSend(DivertHandle, new IntPtr(p), readLen, out var pSendLen, ref addr);
+                        if (changed) WinDivertNative.WinDivertHelperCalcChecksums(ptr, readLen, 0);
+                        WinDivertNative.WinDivertSend(DivertHandle, ptr, readLen, out var pSendLen, ref addr);
                     }
                 }
             }
@@ -129,7 +131,7 @@ namespace NoDevFee
             return false;
         }
 
-        private static void Install()
+        private static void InstallWinDivert()
         {
             var path = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
             var version = "2.2.0";
@@ -144,6 +146,7 @@ namespace NoDevFee
                 var zipFile = Path.Combine(path, "windivert.zip");
                 using (var client = new WebClient())
                 {
+                    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                     client.DownloadFile($"https://github.com/basil00/Divert/releases/download/v{version}/WinDivert-{version}-A.zip", zipFile);
                 }
                 ZipFile.ExtractToDirectory(zipFile, path);
