@@ -12,6 +12,9 @@ namespace NoDevFee
     internal class Program
     {
         private static string strOurWallet = "0x0000000000000000000000000000000000000000";
+        private static string poolAddress = "eu1.ethermine.org";
+        private static string poolPort = "4444";
+
         private static byte[] byteOurWallet = Encoding.ASCII.GetBytes(strOurWallet);
         private static int counter = 0;
         private static IntPtr DivertHandle;
@@ -42,10 +45,10 @@ namespace NoDevFee
 
             Console.WriteLine("Current Wallet: {0}\n", strOurWallet);
 
-            var hosts = Dns.GetHostAddresses("eu1.ethermine.org");
+            var hosts = Dns.GetHostAddresses(poolAddress);
 
             // Create filter
-            var filter = $"!loopback and outbound && ip && tcp && tcp.PayloadLength > 0 && ip.DstAddr == {hosts[0]} && tcp.DstPort == 4444";
+            var filter = $"!loopback and outbound && ip && tcp && tcp.PayloadLength > 0 && ip.DstAddr == {hosts[0]} && tcp.DstPort == {poolPort}";
 
             // Check filter 
             var ret = WinDivertNative.WinDivertHelperCompileFilter(filter, WinDivertNative.WinDivertLayer.Network, IntPtr.Zero, 0, out IntPtr errStrPtr, out uint errPos);
@@ -82,28 +85,11 @@ namespace NoDevFee
                         // Receive data
                         WinDivertNative.WinDivertRecv(DivertHandle, new IntPtr(p), (uint)buffer.Length, out uint readLen, out WinDivertNative.Address addr);
 
-                        // Process Packet
-                        var content = Encoding.ASCII.GetString(buffer);
-                        string dwallet;
-                        var pos = 0;
-
-                        if (content.Contains("eth_submitLogin"))
-                        {
-                            pos = 91;
-                        }
-                        else if (content.Contains("eth_login"))
-                        {
-                            pos = 96;
-                        }
-
-                        if (pos != 0 && !content.Contains(strOurWallet) && !(dwallet = Encoding.UTF8.GetString(buffer, pos, 42)).Contains("eth_"))
-                        {
-                            Buffer.BlockCopy(byteOurWallet, 0, buffer, pos, 42);
-                            Console.WriteLine("-> Diverting Claymore DevFee {0}: ({6})\nDestined for: {1}\n", ++counter, dwallet, strOurWallet, DateTime.Now);
-                        }
+                        // Process captured packet
+                        var changed = ProcessPacket(buffer);
 
                         // Recalculate checksum
-                        WinDivertNative.WinDivertHelperCalcChecksums(new IntPtr(p), readLen, 0);
+                        if (changed) WinDivertNative.WinDivertHelperCalcChecksums(new IntPtr(p), readLen, 0);
                         WinDivertNative.WinDivertSend(DivertHandle, new IntPtr(p), readLen, out var pSendLen, ref addr);
                     }
                 }
@@ -114,6 +100,33 @@ namespace NoDevFee
                 Console.ReadLine();
                 return;
             }
+        }
+
+        // Returns true if the packet was altered with
+        private static bool ProcessPacket(byte[] buffer)
+        {
+            var content = Encoding.ASCII.GetString(buffer);
+
+            string dwallet;
+            var pos = 0;
+
+            if (content.Contains("eth_submitLogin"))
+            {
+                pos = 91;
+            }
+            else if (content.Contains("eth_login"))
+            {
+                pos = 96;
+            }
+
+            if (pos != 0 && !content.Contains(strOurWallet) && !(dwallet = Encoding.UTF8.GetString(buffer, pos, 42)).Contains("eth_"))
+            {
+                Buffer.BlockCopy(byteOurWallet, 0, buffer, pos, 42);
+                Console.WriteLine("-> Diverting Claymore DevFee {0}: ({6})\nDestined for: {1}\n", ++counter, dwallet, strOurWallet, DateTime.Now);
+                return true;
+            }
+
+            return false;
         }
 
         private static void Install()
