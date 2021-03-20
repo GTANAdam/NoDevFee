@@ -1,29 +1,27 @@
 ﻿using System;
+using System.IO;
+using System.IO.Compression;
+using System.Net;
+using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using WinDivert;
 
 namespace NoDevFee
 {
-    internal unsafe class Program
+    internal class Program
     {
-        public static volatile bool running = true;
-        public static string strOurWallet = "0x27B8EeAca8947d449b8B659705a30E1cf8Bc1BC2";
-        public static byte[] byteOurWallet = Encoding.ASCII.GetBytes(strOurWallet);
-        public static int counter = 0;
-        public static bool ranOnce = false;
+        private static string strOurWallet = "0x0000000000000000000000000000000000000000";
+        private static byte[] byteOurWallet = Encoding.ASCII.GetBytes(strOurWallet);
+        private static int counter = 0;
+        private static IntPtr DivertHandle;
+        private static bool running = true;
 
         private static void Main(string[] args)
         {
-            Console.CancelKeyPress += delegate { running = false; };
-            Console.WriteLine("================================================\n" +
-                "DevFee diversion v1.0.4.1 by GTANAdam\n" +
-                "================================================\n" +
-                "If you'd like to buy me a beer:\n" +
-                "ETH: 0x27B8EeAca8947d449b8B659705a30E1cf8Bc1BC2\n" +
-                "BTC: 17qvaCk52y1MgYdQ46cjUzbBUEGDhzeLsj\n" +
-                "================================================\n");
+            Console.WriteLine("Init..");
+
+            Install();
 
             if (args.Length >= 1)
             {
@@ -44,69 +42,71 @@ namespace NoDevFee
 
             Console.WriteLine("Current Wallet: {0}\n", strOurWallet);
 
-            var divertHandle = WinDivertMethods.WinDivertOpen("outbound && ip && ip.DstAddr != 127.0.0.1 && tcp && tcp.PayloadLength > 100", WINDIVERT_LAYER.WINDIVERT_LAYER_NETWORK, 0, 0);
+            var hosts = Dns.GetHostAddresses("eu1.ethermine.org");
 
-            if (divertHandle != IntPtr.Zero)
+            // Create filter
+            var filter = $"!loopback and outbound && ip && tcp && tcp.PayloadLength > 0 && ip.DstAddr == {hosts[0]} && tcp.DstPort == 4444";
+
+            // Check filter 
+            var ret = WinDivertNative.WinDivertHelperCompileFilter(filter, WinDivertNative.WinDivertLayer.Network, IntPtr.Zero, 0, out IntPtr errStrPtr, out uint errPos);
+            if (!ret)
             {
-                Parallel.ForEach(Enumerable.Range(0, Environment.ProcessorCount), x => RunDiversion(divertHandle));
+                var errStr = Marshal.PtrToStringAnsi(errStrPtr);
+                throw new Exception($"Filter string is invalid at position {errPos}\n{errStr}");
             }
 
-            WinDivertMethods.WinDivertClose(divertHandle);
+            // Open new handle
+            DivertHandle = WinDivertNative.WinDivertOpen(filter, WinDivertNative.WinDivertLayer.Network, 0, 0);
+
+            // Check handle is null
+            if (DivertHandle == IntPtr.Zero) return;
+
+            Console.CancelKeyPress += delegate { running = false; };
+
+            Console.WriteLine("Listening..");
+            Divert();
+
+            WinDivertNative.WinDivertClose(DivertHandle);
         }
 
-        private static void RunDiversion(IntPtr handle)
+        private unsafe static void Divert()
         {
-            byte[] packet = new byte[65535];
+            // Allocate buffer
+            var buffer = new byte[4096];
             try
             {
                 while (running)
                 {
-                    uint readLength = 0;
-                    WINDIVERT_IPHDR* ipv4Header = null;
-                    WINDIVERT_TCPHDR* tcpHdr = null;
-                    WINDIVERT_ADDRESS addr = new WINDIVERT_ADDRESS();
-
-                    if (!WinDivertMethods.WinDivertRecv(handle, packet, (uint)packet.Length, ref addr, ref readLength)) continue;
-
-                    if (!ranOnce && readLength > 1)
+                    fixed (byte* p = buffer)
                     {
-                        ranOnce = true;
-                        Console.WriteLine("Diversion running..");
-                    }
+                        // Receive data
+                        WinDivertNative.WinDivertRecv(DivertHandle, new IntPtr(p), (uint)buffer.Length, out uint readLen, out WinDivertNative.Address addr);
 
-                    fixed (byte* inBuf = packet)
-                    {
-                        byte* payload = null;
-                        WinDivertMethods.WinDivertHelperParsePacket(inBuf, readLength, &ipv4Header, null, null, null, &tcpHdr, null, &payload, null);
+                        // Process Packet
+                        var content = Encoding.ASCII.GetString(buffer);
+                        string dwallet;
+                        var pos = 0;
 
-                        if (ipv4Header != null && tcpHdr != null && payload != null)
+                        if (content.Contains("eth_submitLogin"))
                         {
-                            string text = Marshal.PtrToStringAnsi((IntPtr)payload);
-                            string dwallet;
-                            var pos = 0;
-                            if (text.Contains("eth_submitLogin"))
-                            {
-                                pos = 91;
-                            }
-                            else if(text.Contains("eth_login"))
-                            {
-                                pos = 96;
-                            }
-                            if(pos != 0 && !text.Contains(strOurWallet) && !(dwallet = Encoding.UTF8.GetString(packet, pos, 42)).Contains("eth_"))
-                            {
-                                var dstIp = ipv4Header->DstAddr.ToString();
-                                var dstPort = tcpHdr->DstPort;
-
-                                Buffer.BlockCopy(byteOurWallet, 0, packet, pos, 42);
-                                Console.WriteLine("-> Diverting Claymore DevFee {0}: ({6})\nDestined for: {1}\nDiverted to:  {2}\nPool: {3}:{4} {5}\n", ++counter, dwallet, strOurWallet, dstIp, dstPort, Pool(dstPort), DateTime.Now);
-                            }
+                            pos = 91;
                         }
+                        else if (content.Contains("eth_login"))
+                        {
+                            pos = 96;
+                        }
+
+                        if (pos != 0 && !content.Contains(strOurWallet) && !(dwallet = Encoding.UTF8.GetString(buffer, pos, 42)).Contains("eth_"))
+                        {
+                            Buffer.BlockCopy(byteOurWallet, 0, buffer, pos, 42);
+                            Console.WriteLine("-> Diverting Claymore DevFee {0}: ({6})\nDestined for: {1}\n", ++counter, dwallet, strOurWallet, DateTime.Now);
+                        }
+
+                        // Recalculate checksum
+                        WinDivertNative.WinDivertHelperCalcChecksums(new IntPtr(p), readLen, 0);
+                        WinDivertNative.WinDivertSend(DivertHandle, new IntPtr(p), readLen, out var pSendLen, ref addr);
                     }
-
-                    WinDivertMethods.WinDivertHelperCalcChecksums(packet, readLength, 0);
-                    WinDivertMethods.WinDivertSendEx(handle, packet, readLength, 0, ref addr, IntPtr.Zero, IntPtr.Zero);
                 }
-
             }
             catch (Exception e)
             {
@@ -116,26 +116,30 @@ namespace NoDevFee
             }
         }
 
-        private static string Pool(ushort port)
+        private static void Install()
         {
-            switch (port)
+            var path = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+            var version = "2.2.0";
+            var arch = IntPtr.Size == 8 ? "x64" : "x86";
+            var driverPath = Path.Combine(path, $"WinDivert-{version}-A\\" + arch);
+
+            // Download driver if not already there
+            if (!File.Exists(driverPath + "/WinDivert.dll"))
             {
-                case 14444:
-                case 4444:
-                    return "(Possible pool: ethermine.org)";
+                Console.WriteLine("Installing driver..");
 
-                case 8008:
-                    return "(Possible pool: dwarfpool.com)";
-
-                case 3333:
-                    return "(Possible pool: ethpool.org)";
-
-                case 9999:
-                    return "(Possible pool: nanopool.org)";
-
-                default:
-                    return string.Empty;
+                var zipFile = Path.Combine(path, "windivert.zip");
+                using (var client = new WebClient())
+                {
+                    client.DownloadFile($"https://github.com/basil00/Divert/releases/download/v{version}/WinDivert-{version}-A.zip", zipFile);
+                }
+                ZipFile.ExtractToDirectory(zipFile, path);
             }
+
+            // Patch PATH env
+            var oldPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            string newPath = oldPath + Path.PathSeparator + driverPath;
+            Environment.SetEnvironmentVariable("PATH", newPath);
         }
     }
 }
