@@ -8,7 +8,7 @@
 ## Usage
 
 - Launching Claymore Miner
-- Launching NoDevFee via cmd with your target wallet as argument
+- Launching NoDevFee via Command Prompt with your target wallet as argument
 
 ```bash
 NoDevFee.exe 0x1234567890123456789012345678901234567890
