@@ -88,7 +88,7 @@ namespace NoDevFee
                         WinDivertNative.WinDivertRecv(DivertHandle, ptr, (uint)buffer.Length, out uint readLen, out WinDivertNative.Address addr);
 
                         // Process captured packet
-                        var changed = ProcessPacket(buffer);
+                        var changed = ProcessPacket(buffer, readLen);
 
                         // Recalculate checksum
                         if (changed) WinDivertNative.WinDivertHelperCalcChecksums(ptr, readLen, 0);
@@ -105,9 +105,9 @@ namespace NoDevFee
         }
 
         // Returns true if the packet was altered with
-        private static bool ProcessPacket(byte[] buffer)
+        private static bool ProcessPacket(byte[] buffer, uint length)
         {
-            var content = Encoding.ASCII.GetString(buffer);
+            var content = Encoding.ASCII.GetString(buffer, 0, (int)length);
 
             string dwallet;
             var pos = 0;

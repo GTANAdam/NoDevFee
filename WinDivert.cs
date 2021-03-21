@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace WinDivert
 {
-    public static unsafe class WinDivertNative
+    public static class WinDivertNative
     {
         public enum WinDivertPacketFlags : byte
         {
